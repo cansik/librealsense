@@ -122,7 +122,13 @@ void hid_sensor::open( const stream_profiles & requests )
             fps_to_sampling_frequency(request->get_stream_type(), request->get_framerate()),
             get_imu_sensitivity_values( request->get_stream_type() ) } );
     }
-    _hid_device->open( configured_hid_profiles );
+    try {
+        _hid_device->open( configured_hid_profiles );
+    } catch (...) {
+        _configured_profiles.clear();
+        _is_configured_stream.assign(RS2_STREAM_COUNT, false);
+        throw;
+    }
     if( Is< librealsense::global_time_interface >( _owner ) )
     {
         As< librealsense::global_time_interface >( _owner )->enable_time_diff_keeper( true );

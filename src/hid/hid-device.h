@@ -17,7 +17,7 @@
 #include <thread>
 #include "../types.h"
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
 #include <hidapi.h>
 #endif
 
@@ -53,7 +53,7 @@ namespace librealsense
             rs_usb_interface get_hid_interface();
             //for gyro sensitivity the default value we set in feature report is 0.1, which is mapped in FW to 30.5 millideg/sec
             usb_status set_feature_report( unsigned char power, int report_id, int fps = 0, double sensitivity = 0.1 );
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
            int hidapi_PowerDevice(unsigned char reportId);
 #endif
 
@@ -62,7 +62,7 @@ namespace librealsense
 
             hid_callback _callback;
             rs_usb_device _usb_device;
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
             hidapi_device* _hidapi_device = nullptr;
 #else
             rs_usb_messenger _messenger;
@@ -76,7 +76,7 @@ namespace librealsense
             std::vector<hid_profile> _configured_profiles;
             single_consumer_queue<REALSENSE_HID_REPORT> _queue;
             std::shared_ptr<active_object<>> _handle_interrupts_thread;
-            int _realsense_hid_report_actual_size = 32; // for FW version >=5.16 the struct changed to 38 bit
+            int _realsense_hid_report_actual_size = 32; // for FW version >=5.16 the struct changed to 38 bytes
             double _gyro_scale_factor = 10.0;
         };
     }

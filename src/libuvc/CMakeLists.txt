@@ -8,9 +8,12 @@ target_sources(${LRS_TARGET}
 
 )
 
+if(NOT MACOS_USB_DRIVERKIT)
 include(libusb_config)
 target_link_libraries(${LRS_TARGET} PRIVATE usb)
 if(USE_EXTERNAL_USB)
     add_dependencies(${LRS_TARGET} libusb)
 endif()
 
+
+endif()

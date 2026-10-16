@@ -1076,7 +1076,7 @@ namespace librealsense
             , ds_thermal_tracking( d400_device::_thermal_monitor )
         {
             ds_advanced_mode_base::initialize_advanced_mode( this );
-#if !defined(__APPLE__) // Motion sensors not supported on macOS
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT)
             register_gyro_sensitivity();
 #endif
         }

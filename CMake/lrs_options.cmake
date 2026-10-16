@@ -88,3 +88,5 @@ option(BUILD_ASAN "Enable AddressSanitizer" OFF)
 option(BUILD_ROSBAG2 "Build and use rosbag2 recording system" ON) # temporary flag, should be removed when deprecated ROSBAG1 recording system is removed
 option(ENABLE_STATS "Enable RUM (Real User Monitoring) usage-statistics collection" ON)
 mark_as_advanced(BUILD_ASAN)
+
+option(MACOS_USB_DRIVERKIT "Use the RealSense macOS USBDriverKit transport (no libusb)" OFF)

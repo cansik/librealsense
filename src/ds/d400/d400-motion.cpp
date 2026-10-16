@@ -180,7 +180,7 @@ namespace librealsense
 
             initialize_fisheye_sensor( dev_info->get_context(), dev_info->get_group() );
 
-#if !defined(__APPLE__) // Motion sensors not supported on macOS
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT) // RSUSB HID is available through DriverKit
             // Try to add HID endpoint
             auto hid_ep = create_hid_device( dev_info->get_context(), dev_info->get_group().hid_devices );
             if (hid_ep)
@@ -190,7 +190,9 @@ namespace librealsense
                 // HID metadata attributes
                 hid_ep->get_raw_sensor()->register_metadata(RS2_FRAME_METADATA_FRAME_TIMESTAMP, make_hid_header_parser(&hid_header::timestamp));
             }
-            //for FW >=5.16 the scale factor changes to 1000.0 since FW sends 32bit
+            if (!hid_ep)
+                throw std::runtime_error("Motion Module has no HID endpoint");
+            // FW >=5.16 uses 38-byte reports with 32-bit axes. Configure before capture.
             if (_fw_version >= firmware_version( 5, 16, 0, 0))
                 get_raw_motion_sensor()->set_gyro_scale_factor( 10000.0 );
             // Windows MF receives accel in G and rebuilds FW counts; derive the factor from the
@@ -216,16 +218,18 @@ namespace librealsense
 
     ds_motion_sensor & d400_motion::get_motion_sensor()
     {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
         throw std::runtime_error("Motion sensors are not supported on macOS");
 #else
+        if (!_motion_module_device_idx)
+            throw std::runtime_error("Motion Module is unavailable on this device");
         return dynamic_cast< ds_motion_sensor & >( get_sensor( _motion_module_device_idx.value() ) );
 #endif
     }
 
     std::shared_ptr<hid_sensor> d400_motion::get_raw_motion_sensor()
     {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
         return nullptr;
 #else
         auto raw_sensor = get_motion_sensor().get_raw_sensor();

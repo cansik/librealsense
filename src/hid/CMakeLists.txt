@@ -7,7 +7,7 @@ target_sources(${LRS_TARGET}
         "${CMAKE_CURRENT_LIST_DIR}/hid-device.cpp"
 )
 
-if(APPLE)
+if(APPLE AND NOT MACOS_USB_DRIVERKIT)
 
     find_library(CoreFoundationLib CoreFoundation)
     find_library(IOKitLib IOKit)

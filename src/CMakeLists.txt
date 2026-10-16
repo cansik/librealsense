@@ -15,7 +15,9 @@ include(${_rel_path}/rum/CMakeLists.txt)
 
 message(STATUS "using ${BACKEND}")
 
-if(UNIX OR (ANDROID_NDK_TOOLCHAIN_INCLUDED AND (${BACKEND} STREQUAL RS2_USE_V4L2_BACKEND)))
+if(MACOS_USB_DRIVERKIT)
+    include(${_rel_path}/macos-driverkit/CMakeLists.txt)
+elseif(UNIX OR (ANDROID_NDK_TOOLCHAIN_INCLUDED AND (${BACKEND} STREQUAL RS2_USE_V4L2_BACKEND)))
     include(${_rel_path}/libusb/CMakeLists.txt)
 endif()
 

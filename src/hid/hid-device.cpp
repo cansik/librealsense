@@ -3,6 +3,7 @@
 
 #include <queue>
 #include "hid-device.h"
+#include "hid-report.h"
 #include <src/platform/hid-data.h>
 
 #include <rsutils/string/from.h>
@@ -49,6 +50,7 @@ namespace librealsense
                     continue;
 
                 auto dev = usb_enumerator::create_usb_device(usb_info);
+                if (!dev) return nullptr;
                 return std::make_shared<rs_hid_device>(dev);
             }
 
@@ -65,7 +67,7 @@ namespace librealsense
             _sensor_to_id[gyro] = REPORT_ID_GYROMETER_3D;
             _sensor_to_id[accel] = REPORT_ID_ACCELEROMETER_3D;
             _sensor_to_id[custom] = REPORT_ID_CUSTOM;
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
             hidapi_device_info *devices = hid_enumerate(0x8086, 0x0);
             if(devices)
             {
@@ -79,7 +81,7 @@ namespace librealsense
 
         rs_hid_device::~rs_hid_device()
         {
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
             if( _hidapi_device )
                 hid_close( _hidapi_device );
 #endif
@@ -98,10 +100,9 @@ namespace librealsense
 
         void rs_hid_device::open(const std::vector<hid_profile>& hid_profiles)
         {
-            for(auto&& p : hid_profiles)
-            {
-                set_feature_report( DEVICE_POWER_D0, _sensor_to_id[p.sensor_name], p.frequency, p.sensitivity );
-            }
+            configure_hid_profiles(hid_profiles, [this](int power, int id, int frequency, double sensitivity) {
+                return set_feature_report(power, id, frequency, sensitivity);
+            });
             _configured_profiles = hid_profiles;
         }
 
@@ -109,6 +110,7 @@ namespace librealsense
         {
             set_feature_report(DEVICE_POWER_D4, REPORT_ID_ACCELEROMETER_3D);
             set_feature_report(DEVICE_POWER_D4, REPORT_ID_GYROMETER_3D);
+            _configured_profiles.clear();
         }
 
         void rs_hid_device::stop_capture()
@@ -117,7 +119,7 @@ namespace librealsense
             {
                 if(!_running)
                     return;
-#ifndef __APPLE__
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT)
                 _request_callback->cancel();
 
                 _queue.clear();
@@ -128,7 +130,7 @@ namespace librealsense
                 _requests.clear();
 #endif
                 _handle_interrupts_thread->stop();
-#ifndef __APPLE__
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT)
                 _messenger.reset();
 #endif
                _running = false;
@@ -143,18 +145,12 @@ namespace librealsense
                     return;
 
                 _callback = callback;
-#ifndef __APPLE__
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT)
                 auto in = get_hid_interface()->get_number();
                 _messenger = _usb_device->open(in);
+                if (!_messenger) throw std::runtime_error("Cannot open HID interface");
 #endif
-                _handle_interrupts_thread = std::make_shared<active_object<>>([this](dispatcher::cancellable_timer cancellable_timer)
-                {
-                    handle_interrupt();
-                }, "hid-interrupts");
-
-                _handle_interrupts_thread->start();
-
-#ifndef __APPLE__
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT)
                 _request_callback = std::make_shared<usb_request_callback>([&](platform::rs_usb_request r)
                     {
                         _action_dispatcher.invoke([this, r](dispatcher::cancellable_timer c)
@@ -162,43 +158,15 @@ namespace librealsense
                             if(!_running)
                                 return;
                             
-                            if( r->get_actual_length() == _realsense_hid_report_actual_size )
-                            {
-                                // for FW version < 5.16 the actual struct is 32 bytes (each IMU axis is 16 bit), so we
-                                // can not use memcpy for
-                                // the whole struct as the new struct (size 38) expect 32 bits for each.
-                                // For FW >= 5.16 we can just use memcpy as the structs size match
-                                REALSENSE_HID_REPORT report;
-                                if( _realsense_hid_report_actual_size != sizeof( REALSENSE_HID_REPORT ) )
-                                {
-
-                                    // x,y,z are all short with: x at offset 10
-                                    //                           y at offset 12
-                                    //                           z at offset 14
-                                    memcpy( &report, r->get_buffer().data(), 10 );
-                                    const int16_t * x
-                                        = reinterpret_cast< const int16_t * >( r->get_buffer().data() + 10 );
-                                    const int16_t * y
-                                        = reinterpret_cast< const int16_t * >( r->get_buffer().data() + 12 );
-                                    const int16_t * z
-                                        = reinterpret_cast< const int16_t * >( r->get_buffer().data() + 14 );
-                                    report.x = *x;
-                                    report.y = *y;
-                                    report.z = *z;
-                                    memcpy( &report.customValue1, r->get_buffer().data() + 16, 16 );
-
-                                }
-                                else
-                                {
-                                    // the rest of the data in the old struct size (after z element) starts from offset
-                                    // 16 and has 16 bytes till end
-                                    memcpy( &report, r->get_buffer().data(), r->get_actual_length() );
-                                }
+                            REALSENSE_HID_REPORT report{};
+                            if (r->get_actual_length() >= 0
+                                && static_cast<size_t>(r->get_actual_length()) <= r->get_buffer().size()
+                                && decode_hid_report(r->get_buffer().data(), r->get_actual_length(),
+                                                     _realsense_hid_report_actual_size, report))
                                 _queue.enqueue(std::move(report));
-                            }
                             auto sts = _messenger->submit_request(r);
                             if (sts != platform::RS2_USB_STATUS_SUCCESS)
-                                LOG_ERROR("failed to submit UVC request");
+                                LOG_ERROR("failed to resubmit HID interrupt request: " << sts);
                         });
 
                     });
@@ -211,10 +179,30 @@ namespace librealsense
                     r->set_callback(_request_callback);
                 }
 #endif
+                _handle_interrupts_thread = std::make_shared<active_object<>>([this](dispatcher::cancellable_timer cancellable_timer)
+                {
+                    handle_interrupt();
+                }, "hid-interrupts");
+
+                _handle_interrupts_thread->start();
+
                 _running = true;
-#ifndef __APPLE__
-                for(auto&& r : _requests)
-                    _messenger->submit_request(r);
+#if !defined(__APPLE__) || defined(RS2_MACOS_DRIVERKIT)
+                try {
+                    for(auto&& r : _requests) {
+                        auto result = _messenger->submit_request(r);
+                        if (result != RS2_USB_STATUS_SUCCESS)
+                            throw std::runtime_error("Cannot submit HID interrupt request (USB status " + std::to_string(result) + ")");
+                    }
+                } catch (...) {
+                    _running = false;
+                    _request_callback->cancel();
+                    for (auto && r : _requests) _messenger->cancel_request(r);
+                    _requests.clear();
+                    _handle_interrupts_thread->stop();
+                    _messenger.reset();
+                    throw;
+                }
 #endif
 
             }, [this](){ return _running; }, true);
@@ -229,7 +217,7 @@ namespace librealsense
             // For FW >= 5.16 we can just use memcpy as the structs size match
            
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
             unsigned char tmp_buffer[100] = { 0 };
             hid_read( _hidapi_device, tmp_buffer, _realsense_hid_report_actual_size );
             if( _realsense_hid_report_actual_size != sizeof( REALSENSE_HID_REPORT ) )
@@ -301,12 +289,12 @@ namespace librealsense
 
         usb_status rs_hid_device::set_feature_report( unsigned char power, int report_id, int fps, double sensitivity)
         {
-            uint32_t transferred;
+            uint32_t transferred = 0;
 
 
             int value = (HID_REPORT_TYPE_FEATURE << 8) + report_id;
 
-            FEATURE_REPORT featureReport;
+            FEATURE_REPORT featureReport{};
             auto hid_interface = get_hid_interface()->get_number();
 
             auto dev = _usb_device->open(hid_interface);
@@ -328,6 +316,9 @@ namespace librealsense
                 LOG_WARNING("control_transfer of USB_REQUEST_CODE_GET failed return value is: " << res);
                 return res;
             }
+
+            if (!valid_hid_feature_report(featureReport, report_id, transferred))
+                return RS2_USB_STATUS_IO;
 
             featureReport.power = power;
 
@@ -355,6 +346,8 @@ namespace librealsense
                 return res;
             }
 
+            if (transferred != sizeof(featureReport)) return RS2_USB_STATUS_IO;
+
             res = dev->control_transfer(USB_REQUEST_CODE_GET,
                 HID_REQUEST_GET_REPORT,
                 value,
@@ -370,6 +363,9 @@ namespace librealsense
                 return res;
             }
 
+            if (!valid_hid_feature_report(featureReport, report_id, transferred))
+                return RS2_USB_STATUS_IO;
+
             if(featureReport.power != power)
             {
                 LOG_WARNING("faild to set power: " << power);
@@ -378,7 +374,7 @@ namespace librealsense
             return res;
         }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(RS2_MACOS_DRIVERKIT)
         int rs_hid_device::hidapi_PowerDevice(unsigned char reportId)
         {
             if (_hidapi_device == NULL)

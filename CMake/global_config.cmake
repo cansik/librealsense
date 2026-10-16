@@ -106,7 +106,9 @@ macro(global_set_flags)
     endif()
 
     if(BUILD_PYTHON_BINDINGS)
-        include(libusb_config)
+        if(NOT MACOS_USB_DRIVERKIT)
+            include(libusb_config)
+        endif()
         include(CMake/external_pybind11.cmake)
     endif()
 
