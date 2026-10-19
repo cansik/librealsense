@@ -83,6 +83,7 @@ struct Client::Impl {
     std::set<std::pair<uint8_t, uint8_t>> endpoints;
     Device device;
     bool stopping = false;
+    bool stopCompletionLoop = false;
     uint32_t callbacks = 0;
     bool ready = false;
     ~Impl() {
@@ -96,6 +97,9 @@ struct Client::Impl {
         if (thread.joinable()) {
             std::unique_lock<std::mutex> lock(mutex);
             condition.wait(lock, [&] { return pending.empty() && callbacks == 0; });
+            // Refuse new submissions during cancellation, but keep delivering
+            // completions until every request and running callback has drained.
+            stopCompletionLoop = true;
             if (loop) { CFRunLoopStop(loop); CFRunLoopWakeUp(loop); }
             lock.unlock(); thread.join();
         }
@@ -103,14 +107,14 @@ struct Client::Impl {
     }
     void run() {
         port = IONotificationPortCreate(kIOMainPortDefault);
-        loop = CFRunLoopGetCurrent();
+        loop = port ? CFRunLoopGetCurrent() : nullptr;
         if (port) CFRunLoopAddSource(loop, IONotificationPortGetRunLoopSource(port), kCFRunLoopDefaultMode);
         {
             std::lock_guard<std::mutex> lock(mutex); ready = true; condition.notify_all();
         }
         if (port) {
             while (true) {
-                { std::lock_guard<std::mutex> lock(mutex); if (stopping) break; }
+                { std::lock_guard<std::mutex> lock(mutex); if (stopCompletionLoop) break; }
                 CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1, false);
             }
         }
