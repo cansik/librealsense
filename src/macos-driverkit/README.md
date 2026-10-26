@@ -38,8 +38,11 @@ companion repository's [README](https://github.com/cansik/realsense-macos#build)
 `transport/` contains the fixed-width user-client ABI, descriptor validation,
 physical-camera lease policy and IOKit client. The companion driver opens the
 physical device and its interfaces, replacing Apple's consumers for that matched
-device. Matching currently covers D455 (`8086:0b5c`) and the D400 recovery
-identifiers (`8086:0adb`, `8086:0adc`); it does not claim unrelated USB cameras.
+device. Matching is restricted to the D400/D500 USB identifiers in the companion
+repository's [device catalog](https://github.com/cansik/realsense-macos/blob/main/config/supported-devices.json),
+including camera, motion-only and firmware-recovery devices. Catalog membership
+does not imply that every model or stream configuration has been validated on
+hardware. Synthetic MIPI/GMSL identifiers are excluded.
 
 All SDK messengers for a physical camera in one process share its connection and
 lease. Depth, color, hardware-monitor and HID traffic therefore use the same
