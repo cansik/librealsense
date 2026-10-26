@@ -62,11 +62,13 @@ serial selection should use the serial reported by the SDK.
 
 ## Motion sensors
 
-DriverKit builds expose the D455 Motion Module through the existing SDK API.
-Gyroscope and accelerometer streams use RSUSB HID feature reports and interrupt
-transfers on the same physical-camera lease as video. The SDK handles report
-formats, motion correction, calibration, extrinsics and timestamps. The legacy
-Apple backend remains unchanged.
+DriverKit builds route advertised HID motion sensors through the existing SDK
+API using RSUSB feature reports and interrupt transfers on the same
+physical-camera lease as video. Cameras without HID motion sensors do not gain
+an IMU from this backend. Other SDK motion paths remain model-dependent. The SDK
+handles report formats, motion correction, calibration, extrinsics and timestamps.
+The legacy Apple backend remains unchanged. These code paths require hardware
+validation for each model and firmware combination.
 
 Choose rates from the device's advertised profiles; accelerometer rates depend on
 the IMU revision. Motion profiles use `MOTION_XYZ32F`. Acceleration is reported in
